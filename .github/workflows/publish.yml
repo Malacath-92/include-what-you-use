@@ -1,0 +1,65 @@
+name: Github Actions Publish
+
+on:
+  push:
+    tags:
+      - "*"
+
+jobs:
+  release:
+    name: Windows ${{ matrix.build_type }}
+    runs-on: windows-2019
+
+    steps:
+      - uses: llvm/actions/setup-windows@main # stolen from llvm-project
+        with:
+          arch: amd64
+      - uses: llvm/actions/install-ninja@main
+      - uses: actions/checkout@v3
+        with:
+          submodules: "recursive"
+
+      - name: Configure LLVM
+        run: |
+          Get-Volume
+          cd llvm-project
+          mkdir build
+          cd build
+          cmake -DLLVM_ENABLE_PROJECTS=clang -DCMAKE_CXX_COMPILER=cl -DCMAKE_C_COMPILER=cl -DCMAKE_BUILD_TYPE=Release -GNinja ../llvm
+
+      - name: Build LLVM
+        run: |
+          cd llvm-project/build
+          cmake --build . --target clang --config Release
+
+      - name: Configure IWYU
+        run: |
+          $IWYU_ROOT=(Get-Location).Path
+          mkdir build
+          cd build
+          cmake -DCMAKE_PREFIX_PATH="$IWYU_ROOT/llvm-project/build/lib/cmake" -DCMAKE_CXX_COMPILER=cl -DCMAKE_C_COMPILER=cl -DCMAKE_BUILD_TYPE=Release -GNinja ..
+
+      - name: Build IWYU
+        run: |
+          cd build
+          cmake --build . --config Release
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          draft: false
+
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./build/bin/include-what-you-use.exe
+          asset_name: include-what-you-use.exe
+          asset_content_type: application/exe
